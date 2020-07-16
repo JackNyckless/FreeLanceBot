@@ -656,4 +656,4 @@ def callback_inline(call):
 
 
 print("Bot start")
-bot.polling()
+bot.polling(none_stop=True, timeout=123)
