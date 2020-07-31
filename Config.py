@@ -9,12 +9,12 @@ channel_id = -1001448685408
 
 
 #ID аккаунта админа
-admin_id = 804339879
+admin_id = 317583841
 
 
 
 #Ссылка на админа
-admin_link = "@LostInWay"
+admin_link = "@M777evr"
 
 
 
