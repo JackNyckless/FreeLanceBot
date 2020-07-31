@@ -10,10 +10,20 @@ conn = Functions.connect()
 cursor = conn.cursor()
 
 
+try:
+    cursor.execute("""CREATE TABLE reports
+                  (zakaz INTEGER, mes INTEGER, who INTEGER, reason TEXT)
+               """)
+except:
+    exc = True
+
+
+conn.commit()
+
 
 try:
     cursor.execute("""CREATE TABLE users
-                  (id INTEGER, type TEXT, anketa INTEGER)
+                  (id INTEGER, type TEXT, anketa INTEGER, get_result INTEGER, areason INTEGER, a_deny INTEGER)
                """)
 except:
     exc = True
