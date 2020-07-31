@@ -1,5 +1,6 @@
 import psycopg2
 from telebot import types
+from psycopg2 import sql as sq
 
 
 
@@ -8,6 +9,27 @@ def connect():
                             password='oaDp4ktCdeDzqUTAmpu-r7MAxLjNjTBk',
                             host='rogue.db.elephantsql.com', port='5432')
     return conn
+
+
+
+def update(table, set, val1, where, val2):
+    conn = connect()
+    cursor = conn.cursor()
+    sql = """
+                                             UPDATE """ + str(table) + """ 
+                                             SET """ + str(set) + """ = """ + str(val1) + """
+                                             WHERE """ + str(where) + """ = """ + str(val2)
+    cursor.execute(sql)
+    conn.commit()
+
+
+def select(table, where, val):
+    conn = connect()
+    cursor = conn.cursor()
+    sql = "SELECT * FROM " + str(table) + " WHERE " + str(where) + " = " + str(val)
+    cursor.execute(sql)
+    return cursor.fetchall()
+
 
 
 
@@ -56,8 +78,8 @@ def text4(punct, id, conn):
 
 
 def text5(id, conn):
-    sql = "SELECT * FROM made WHERE id=" + str(id)
     cursor = conn.cursor()
+    sql = "SELECT * FROM made WHERE id=" + str(id)
     cursor.execute(sql)
     result = cursor.fetchall()
     end = "*Ваша выполненная работа*\n\n 〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️\n📋 Заказ:  _"\
@@ -145,10 +167,56 @@ def ready(zakaz, conn):
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM made WHERE zakaz=" + str(zakaz))
     res = cursor.fetchall()
+    albums = [int(zakaz), 0, 0, ""]
+    cursor.execute("SELECT * FROM reports WHERE zakaz=" + str(zakaz))
+    if cursor.fetchall() == []:
+        sql = sq.SQL('INSERT INTO reports (zakaz, mes, who, reason) VALUES ({})').format(
+            sq.SQL(',').join(map(sq.Literal, albums)))
+        cursor.execute(sql)
+    conn.commit()
     message = "*ВАШ ЗАКАЗ УСПЕШНО ВЫПОЛНИЛИ!*\n\nВот работы трёх наших исполнителей:\n\n"
     i = 0
     for r in res:
         i += 1
         message += "〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️\nИсполнитель: №" + str(i) + "\nНашёл товар по цене: " + str(r[2]) + "\nСсылки на товар: " + str(r[3]) + "\nСообщение от исполнителя: " + str(r[4]) + "\n"
     message += "〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️\n\n_Если какой-то из исполнителей предоставил нерабочие ссылки, или написал совершенно неверную сумму, или обманул вас в чём-то, вы можете подать на него жалобу. Если модератор одобрит жалобу, то старый исполнитель будет наказан, а мы предоставим вам нового._ *Пожалуйста, не подавайте ложных жалоб.*\n\nОжидаем вашего решения. Если в течении 48 часов от вас не будет ответа, заказ одобрится автоматически."
+    sql = """
+                                             UPDATE reports
+                                             SET who = 0
+                                             WHERE zakaz = """ + str(zakaz)
+    cursor.execute(sql)
+    conn.commit()
     return message
+
+
+def report(conn, zakaz, id, un):
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM reports WHERE zakaz=" + str(zakaz))
+    res = cursor.fetchall()[0]
+    wh = int(res[2])
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM made WHERE zakaz=" + str(zakaz))
+    res2 = cursor.fetchall()
+    i = 0
+    for r2 in res2:
+        i += 1
+        if r2[0] == wh:
+            res3 = r2
+            break
+    if res[2] == 0:
+        who = " не указан"
+    else:
+        who = str(res[2])
+    if un == None:
+        nn = " | " + str(who)
+    else:
+        nn = " | @" + str(un)
+    message = "〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️\n\n*Ж А Л О Б А*\n\nЗаказ *№" + str(res[0]) + "*\nОт кого: *id" + str(id) + str(nn) + "*\nНа кого: *id" + who + "*\nПричина: *" + str(res[3])
+    if who != "-":
+        message += "*\n\n*РАБОТА ПОДОЗРЕВАЕМОГО*\n\nИсполнитель: *№" + str(i) + "*\nНашёл товар по цене: *" + str(res3[2]) + "*\nСсылки на товар: *" + str(res3[3]) + "*\nСообщение от исполнителя: *" + str(res3[4])
+    message += "*\n\n〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️"
+    return message
+
+
+
+
