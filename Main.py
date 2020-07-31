@@ -5,7 +5,6 @@ import SQL
 from psycopg2 import sql as sq
 
 
-
 token = Config.token
 channel = Config.channel_id
 admin = Config.admin_id
@@ -17,6 +16,7 @@ remove_ = False
 
 
 bot = telebot.TeleBot(token)
+
 
 
 
@@ -43,8 +43,8 @@ def start(message):
     cursor.execute(sql)
     res = cursor.fetchall()
     if res == []:
-        albums = [int(message.from_user.id), None, 1]
-        sql = sq.SQL('INSERT INTO users (id, type, anketa) VALUES ({})').format(
+        albums = [int(message.from_user.id), None, 1, 0, 0, 0]
+        sql = sq.SQL('INSERT INTO users (id, type, anketa, get_result, areason) VALUES ({})').format(
             sq.SQL(',').join(map(sq.Literal, albums)))
         cursor.execute(sql)
     conn.commit()
@@ -75,7 +75,53 @@ def lalala(message):
         sql = "SELECT * FROM workers WHERE id=" + str(message.from_user.id)
         cursor.execute(sql)
         fff = cursor.fetchall()
-        if fff != []:
+        sql = "SELECT * FROM users WHERE id=" + str(message.from_user.id)
+        cursor.execute(sql)
+        rres = cursor.fetchall()
+        if message.text == "тест":
+            sql = """
+                                                                         UPDATE users 
+                                                                         SET get_result = 1
+                                                                         WHERE id = """ + str(message.from_user.id)
+            cursor.execute(sql)
+            conn.commit()
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            allow = types.InlineKeyboardButton("✅ Одобрить", callback_data='allow')
+            deny = types.InlineKeyboardButton("❌ Отклонить", callback_data='deny')
+            markup.add(allow, deny)
+            res = bot.send_message(message.from_user.id, Functions.ready(1, conn), parse_mode="Markdown",
+                                   reply_markup=markup)
+            sql = """
+                                                                         UPDATE reports 
+                                                                         SET mes = """ + str(res.message_id) + """
+                                                                         WHERE zakaz = """ + str(1)
+            cursor.execute(sql)
+            conn.commit()
+        elif int(rres[0][4]) != 0:
+            sql = """
+                UPDATE users
+                SET areason = 0 
+                WHERE id = """ + str(message.from_user.id)
+            cursor.execute(sql)
+            sql = """
+                            UPDATE reports
+                            SET reason = '""" + str(message.text) + """' 
+                            WHERE zakaz = """ + str(int(rres[0][4]))
+            cursor.execute(sql)
+            conn.commit()
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            allow = types.InlineKeyboardButton("✅ Одобрить", callback_data='a_allow')
+            deny = types.InlineKeyboardButton("❌ Отклонить", callback_data='a_deny')
+            markup.add(allow, deny)
+            res = bot.send_message(Config.admin_id, Functions.report(conn, int(rres[0][4]), message.from_user.id, message.from_user.username), parse_mode="Markdown", reply_markup=markup)
+            bot.send_message(message.chat.id, "*Ваша жалоба успешно отправлена!*\n\nОжидайте пока её рассмотрят.", parse_mode="Markdown")
+            sql = """
+                                        UPDATE reports 
+                                        SET mes = """ + str(res.message_id) + """
+                                        WHERE zakaz = """ + str(int(rres[0][4]))
+            cursor.execute(sql)
+            conn.commit()
+        elif fff != []:
             if message.text == "📃 Список доступных заказов":
                 bot.send_message(message.chat.id, Functions.zakazs(False, message.from_user.id, conn), parse_mode="Markdown")
             else:
@@ -303,7 +349,34 @@ def lalala(message):
                                        reply_markup=markup, parse_mode="Markdown")
 
     else:
-        if add_ == True:
+        sql = "SELECT * FROM users"
+        cursor.execute(sql)
+        users = cursor.fetchall()
+        user = []
+        for u in users:
+            if u[5] != 0:
+                user = u
+                break
+        if user != []:
+            sql = """
+                            UPDATE users 
+                            SET a_deny = 0
+                            WHERE id = """ + str(message.from_user.id)
+
+            cursor.execute(sql)
+            conn.commit()
+            bot.send_message(message.chat.id,
+                             "*Вы отклонили жалобу в заказке №" + str(user[5]) + "*\n\nВаше пояснение: '_" + str(message.text) + "_'",
+                             parse_mode="Markdown")
+            sql = "SELECT * FROM zakaz"
+            cursor.execute(sql)
+            zakazs = cursor.fetchall()
+            nid = int(zakazs[user[5]-1][0])
+            bot.send_message(nid,
+                             "*Вашу жалобу к заказу №" + str(user[5]) + " отклонили!*\n\nСообщение модератора: '_" + str(
+                                 message.text) + "_'",
+                             parse_mode="Markdown")
+        elif add_ == True:
             try:
                 id = int(message.text)
                 sql = "SELECT * FROM users WHERE id=" + str(id)
@@ -403,7 +476,7 @@ def callback_inline(call):
                     WHERE id = """ + str(cid)
                 cursor.execute(sql)
                 conn.commit()
-                bot.send_message(call.message.chat.id, "*Отлично!* _Тогда просим отписаться данному человеку:_\n\n*Сергей - t.me/ссылка*\n\n*Обязательно напишите ему ваш id!*\n_Ваш id:_ " + str(cid), parse_mode="Markdown")
+                bot.send_message(call.message.chat.id, "*Отлично!* _Тогда просим отписаться данному человеку:_\n\n*" + str(bot.get_chat_member(Config.channel_id, Config.admin_id).user.first_name) + " - " + str(Config.admin_link) + "*\n\n*Обязательно напишите ему ваш id!*\n_Ваш id:_ " + str(cid), parse_mode="Markdown")
             bot.delete_message(call.message.chat.id, call.message.message_id)
         elif call.data == "new":
             sql = "SELECT * FROM zakaz WHERE id=" + str(cid)
@@ -413,6 +486,12 @@ def callback_inline(call):
             else:
                 bot.send_message(call.message.chat.id, "_В доработке_", parse_mode="Markdown")
         elif call.data == "allow":
+            sql = """
+                                                       UPDATE users 
+                                                       SET get_result = 0
+                                                       WHERE id = """ + str(cid)
+            cursor.execute(sql)
+            conn.commit()
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id)
             bot.send_message(call.message.chat.id, "*Вы приняли работу исполнителей!*\n\nНадеемся, вам всё понравилось.", parse_mode="Markdown")
         elif call.data == "deny":
@@ -424,32 +503,121 @@ def callback_inline(call):
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=markup)
         elif call.data == "report":
             markup = types.InlineKeyboardMarkup(row_width=3)
-            aa = types.InlineKeyboardButton("Исполнитель №1", callback_data='ispoln')
-            aaa = types.InlineKeyboardButton("Исполнитель №2", callback_data='ispoln')
-            aaaa = types.InlineKeyboardButton("Исполнитель №3", callback_data='ispoln')
+            aa = types.InlineKeyboardButton("Исполнитель №1", callback_data='ispoln1')
+            aaa = types.InlineKeyboardButton("Исполнитель №2", callback_data='ispoln2')
+            aaaa = types.InlineKeyboardButton("Исполнитель №3", callback_data='ispoln3')
             back2 = types.InlineKeyboardButton("Назад", callback_data='back2')
             markup.add(aa, aaa, aaaa, back2)
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=markup)
-        elif call.data == "ispoln":
+        elif "reass" in call.data:
+            reason = ""
+            for ll in call.message.json['reply_markup']['inline_keyboard']:
+                for lll in ll:
+                    if lll['callback_data'] == call.data:
+                        reason = str(lll['text'])
+            sql = "SELECT * FROM reports WHERE mes=" + str(call.message.message_id)
+            cursor.execute(sql)
+            res1 = cursor.fetchall()
+            sql = "SELECT * FROM zakaz"
+            cursor.execute(sql)
+            res2 = cursor.fetchall()
+            for r1 in res1:
+                i = 0
+                for r2 in res2:
+                    i += 1
+                    if r1[1] == i and r2[0] == cid:
+                        break
+            sql = """
+                            UPDATE reports
+                            SET reason = '""" + str(reason) + """' 
+                            WHERE zakaz = """ + str(i)
+            cursor.execute(sql)
+            conn.commit()
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id)
             markup = types.InlineKeyboardMarkup(row_width=2)
-            rsum = types.InlineKeyboardButton("Некоректная сумма", callback_data='rsum')
-            rlink = types.InlineKeyboardButton("Нерабочие ссылки", callback_data='rlink')
-            rmes = types.InlineKeyboardButton("Бред в сообщении", callback_data='rmes')
-            rall = types.InlineKeyboardButton("Заказ не выполнен", callback_data='rall')
+            allow = types.InlineKeyboardButton("✅ Одобрить", callback_data='a_allow')
+            deny = types.InlineKeyboardButton("❌ Отклонить", callback_data='a_deny')
+            markup.add(allow, deny)
+            res = bot.send_message(Config.admin_id, Functions.report(conn, i, cid, call.from_user.username), parse_mode="Markdown", reply_markup=markup)
+            bot.send_message(call.message.chat.id, "*Ваша жалоба успешно отправлена!*\n\nОжидайте пока её рассмотрят.",
+                             parse_mode="Markdown")
+            sql = """
+                                        UPDATE reports 
+                                        SET mes = """ + str(res.message_id) + """
+                                        WHERE zakaz = """ + str(i)
+            cursor.execute(sql)
+            conn.commit()
+        elif "ispoln" in call.data:
+            cmd = str(call.data)
+            n = int(cmd.replace("ispoln",""))
+            sql = "SELECT * FROM reports WHERE mes=" + str(call.message.message_id)
+            cursor.execute(sql)
+            res1 = cursor.fetchall()
+            sql = "SELECT * FROM zakaz"
+            cursor.execute(sql)
+            res2 = cursor.fetchall()
+            for r1 in res1:
+                i = 0
+                for r2 in res2:
+                    i += 1
+                    if r1[1] == i and r2[0] == cid:
+                        break
+            sql = "SELECT * FROM made WHERE zakaz=" + str(i)
+            cursor.execute(sql)
+            res3 = cursor.fetchall()
+            who = res3[n-1][0]
+            sql = """
+                UPDATE reports
+                SET who = """ + str(who) + """ 
+                WHERE zakaz = """ + str(i)
+            cursor.execute(sql)
+            conn.commit()
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            rsum = types.InlineKeyboardButton("Некоректная сумма", callback_data='reasssum')
+            rlink = types.InlineKeyboardButton("Нерабочие ссылки", callback_data='reasslink')
+            rmes = types.InlineKeyboardButton("Бред в сообщении", callback_data='reassmes')
+            rall = types.InlineKeyboardButton("Заказ не выполнен", callback_data='reassall')
             back3 = types.InlineKeyboardButton("Назад", callback_data='back3')
             markup.add(rsum, rlink, rmes, rall, back3)
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=markup)
         elif call.data == "back3":
+            sql = "SELECT * FROM reports WHERE mes=" + str(call.message.message_id)
+            cursor.execute(sql)
+            res1 = cursor.fetchall()
+            sql = "SELECT * FROM zakaz"
+            cursor.execute(sql)
+            res2 = cursor.fetchall()
+            for r1 in res1:
+                i = 0
+                for r2 in res2:
+                    i += 1
+                    if r1[1] == i and r2[0] == cid:
+                        break
+            sql = """
+                            UPDATE reports
+                            SET who = 0
+                            WHERE zakaz = """ + str(i)
+            cursor.execute(sql)
+            conn.commit()
             markup = types.InlineKeyboardMarkup(row_width=3)
-            aa = types.InlineKeyboardButton("Исполнитель №1", callback_data='ispoln')
-            aaa = types.InlineKeyboardButton("Исполнитель №2", callback_data='ispoln')
-            aaaa = types.InlineKeyboardButton("Исполнитель №3", callback_data='ispoln')
+            aa = types.InlineKeyboardButton("Исполнитель №1", callback_data='ispoln1')
+            aaa = types.InlineKeyboardButton("Исполнитель №2", callback_data='ispoln2')
+            aaaa = types.InlineKeyboardButton("Исполнитель №3", callback_data='ispoln3')
             back2 = types.InlineKeyboardButton("Назад", callback_data='back2')
             markup.add(aa, aaa, aaaa, back2)
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=markup)
         elif call.data == "question":
+            sql = "SELECT * FROM reports WHERE mes=" + str(call.message.message_id)
+            cursor.execute(sql)
+            num = cursor.fetchall()[0][0]
+            sql = """
+                UPDATE users
+                SET areason = """ + str(num) + """ 
+                WHERE id = """ + str(cid)
+            cursor.execute(sql)
+            conn.commit()
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id)
-            bot.send_message(call.message.chat.id, "*В доработке!*\n\nПока что не работает..", parse_mode="Markdown")
+            bot.send_message(call.message.chat.id, "*Напишите свою причину.*\n\n_Как можно понятнее!_", parse_mode="Markdown")
         elif call.data == "back":
             markup = types.InlineKeyboardMarkup(row_width=2)
             allow = types.InlineKeyboardButton("✅ Одобрить", callback_data='allow')
@@ -508,11 +676,24 @@ def callback_inline(call):
                                  parse_mode="Markdown")
                 bot.send_message(call.message.chat.id, "*НАПИШИТЕ НОМЕР ЗАКАЗА, КОТОРЫЙ ХОТИТЕ ВЫПОЛНИТЬ*", parse_mode="Markdown")
                 if endrs+1 == 3:
+                    sql = """
+                                                             UPDATE users 
+                                                             SET get_result = 1
+                                                             WHERE id = """ + str(id)
+                    cursor.execute(sql)
+                    conn.commit()
                     markup = types.InlineKeyboardMarkup(row_width=2)
                     allow = types.InlineKeyboardButton("✅ Одобрить", callback_data='allow')
                     deny = types.InlineKeyboardButton("❌ Отклонить", callback_data='deny')
                     markup.add(allow, deny)
-                    bot.send_message(id, Functions.ready(int(albums2[1]), conn), parse_mode="Markdown", reply_markup=markup)
+                    res = bot.send_message(id, Functions.ready(int(albums2[1]), conn), parse_mode="Markdown", reply_markup=markup)
+                    print(res.message_id)
+                    sql = """
+                                                             UPDATE reports 
+                                                             SET mes = """ + str(res.message_id) + """
+                                                             WHERE zakaz = """ + str(int(albums2[1]))
+                    cursor.execute(sql)
+                    conn.commit()
 
             elif call.data == "enter":
                 sql = "SELECT * FROM users WHERE id=" + str(cid)
@@ -649,6 +830,136 @@ def callback_inline(call):
                                   text="Вы выбрали: _Список заказов_ 📋", parse_mode="Markdown")
             bot.send_message(call.message.chat.id, Functions.zakazs(True, 0, conn), parse_mode="Markdown")
             panel(call.message.chat.id)
+        if call.data == "yeswarn":
+            sql = "SELECT * FROM reports WHERE mes=" + str(call.message.message_id)
+            cursor.execute(sql)
+            r1 = cursor.fetchall()[0]
+            who = int(r1[2])
+            sql = "SELECT * FROM zakaz"
+            cursor.execute(sql)
+            res2 = cursor.fetchall()
+            i = 0
+            id = 0
+            for r2 in res2:
+                i += 1
+                if r1[0] == i:
+                    id = r2[0]
+                    break
+            sql = "SELECT * FROM workers WHERE id=" + str(who)
+            cursor.execute(sql)
+            aa = cursor.fetchall()[0]
+            warns = int(aa[3])
+            sql = "DELETE FROM made WHERE id=" + str(who) + " AND zakaz=" + str(i)
+            cursor.execute(sql)
+            conn.commit()
+            sql = "SELECT * FROM zakaz"
+            cursor.execute(sql)
+            res_ = cursor.fetchall()[i-1]
+            endrs = int(res_[6])
+            tkers = int(res_[5])
+            idid = int(res_[0])
+            sql = """
+                                                                     UPDATE zakaz 
+                                                                     SET enders = """ + str(endrs - 1) + """
+                                                                     WHERE id = """ + str(idid)
+            cursor.execute(sql)
+            sql = """
+                                                                     UPDATE zakaz 
+                                                                     SET takers = """ + str(tkers - 1) + """
+                                                                     WHERE id = """ + str(idid)
+            cursor.execute(sql)
+            conn.commit()
+            Functions.update("workers","warns",str(warns+1),"id", str(who))
+            bot.send_message(id,
+                             "*Вам одобрили жалобу заказа №" + str(i) + "*\n\nИсполнитель получил наказание!\nТакже вам была выдана замена в виде другого исполнителя. Ожидайте его работу.",
+                             parse_mode="Markdown")
+            bot.send_message(call.message.chat.id, "*Вы одобрили жалобу заказа №" + str(i) + "*\n\nid" + str(who) + " получил наказание!", parse_mode="Markdown")
+            bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id)
+        if call.data == "notwarn":
+            sql = "SELECT * FROM reports WHERE mes=" + str(call.message.message_id)
+            cursor.execute(sql)
+            r1 = cursor.fetchall()[0]
+            who = int(r1[2])
+            sql = "SELECT * FROM zakaz"
+            cursor.execute(sql)
+            res2 = cursor.fetchall()
+            i = 0
+            id = 0
+            for r2 in res2:
+                i += 1
+                if r1[0] == i:
+                    id = r2[0]
+                    break
+            sql = "DELETE FROM made WHERE id=" + str(who) + " AND zakaz=" + str(i)
+            cursor.execute(sql)
+            conn.commit()
+            sql = "SELECT * FROM zakaz"
+            cursor.execute(sql)
+            res_ = cursor.fetchall()[i - 1]
+            endrs = int(res_[6])
+            tkers = int(res_[5])
+            idid = int(res_[0])
+            sql = """
+                                                                                 UPDATE zakaz 
+                                                                                 SET enders = """ + str(endrs - 1) + """
+                                                                                 WHERE id = """ + str(idid)
+            cursor.execute(sql)
+            sql = """
+                                                                                 UPDATE zakaz 
+                                                                                 SET takers = """ + str(tkers - 1) + """
+                                                                                 WHERE id = """ + str(idid)
+            cursor.execute(sql)
+            conn.commit()
+            bot.send_message(id,
+                             "*Вам одобрили жалобу заказа №" + str(
+                                 i) + "*\n\nВам была выдана замена в виде другого исполнителя. Ожидайте его работу.",
+                             parse_mode="Markdown")
+            bot.send_message(call.message.chat.id,
+                             "*Вы одобрили жалобу заказа №" + str(i) + "*\n\nid" + str(who) + " не получил наказание!",
+                             parse_mode="Markdown")
+            bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id)
+        if call.data == "a_allow":
+            sql = "SELECT * FROM reports WHERE mes=" + str(call.message.message_id)
+            cursor.execute(sql)
+            if int(cursor.fetchall()[0][2]) == 0:
+                bot.send_message(call.message.chat.id, "Ещё недоступно, т.к. не указано, на кого написана жалоба")
+            else:
+                markup = types.InlineKeyboardMarkup(row_width=1)
+                da = types.InlineKeyboardButton("Выдать наказание исполн.", callback_data="yeswarn")
+                net = types.InlineKeyboardButton("Сделать предупреждение исполн.", callback_data="notwarn")
+                back = types.InlineKeyboardButton("Назад", callback_data="a_back")
+                markup.add(da, net, back)
+                bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id,
+                                      reply_markup=markup)
+        if call.data == "a_deny":
+            sql = "SELECT * FROM reports WHERE mes=" + str(call.message.message_id)
+            cursor.execute(sql)
+            r1 = cursor.fetchall()[0]
+            sql = "SELECT * FROM zakaz"
+            cursor.execute(sql)
+            res2 = cursor.fetchall()
+            i = 0
+            for r2 in res2:
+                i += 1
+                if r1[0] == i:
+                    break
+            sql = """
+                            UPDATE users 
+                            SET a_deny = """ + str(i) + """
+                            WHERE id = """ + str(cid)
+
+            cursor.execute(sql)
+            conn.commit()
+            bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id)
+            bot.send_message(call.message.chat.id, "*Напишите пояснение, почему вы отклонили данную жалобу*", parse_mode="Markdown")
+        if call.data == "a_back":
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            allow = types.InlineKeyboardButton("✅ Одобрить", callback_data='a_allow')
+            deny = types.InlineKeyboardButton("❌ Отклонить", callback_data='a_deny')
+            markup.add(allow, deny)
+            bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id,
+                                  reply_markup=markup)
+
     conn.close()
 
 
