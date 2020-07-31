@@ -13,5 +13,10 @@ admin_id = 804339879
 
 
 
+#Ссылка на админа
+admin_link = "@LostInWay"
+
+
+
 #Ссылка-приглашение в канал с заказами
 invite_link = "https://t.me/joinchat/AAAAAFZZL2CXRU5rvwqU8g"
